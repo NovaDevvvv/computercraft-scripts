@@ -33,23 +33,30 @@ local function formatNumber(value)
 end
 
 while true do
-    local ok, data = pcall(reader.getBlockData)
-    local energy = ok and data and tonumber(data.energy) or nil
+    local ok, data = pcall(function()
+        return reader.getBlockData()
+    end)
+
+    local energy = nil
+
+    if ok and type(data) == "table" then
+        energy = tonumber(data.energy)
+    end
 
     local width, height = monitor.getSize()
 
-    monitor.setBackgroundColor(colors.lightGray)
+    monitor.setBackgroundColor(colors.white)
     monitor.setTextColor(colors.black)
     monitor.clear()
 
-    monitor.setBackgroundColor(colors.green)
+    monitor.setBackgroundColor(colors.lime)
     monitor.setTextColor(colors.black)
     monitor.setCursorPos(1, 1)
     monitor.write(string.rep(" ", width))
     center(1, " NUCLEAR POWER ")
 
-    monitor.setBackgroundColor(colors.lightGray)
-    monitor.setTextColor(colors.black)
+    monitor.setBackgroundColor(colors.white)
+    monitor.setTextColor(colors.green)
 
     if height >= 9 then
         center(3, "   .---.   ")
@@ -71,7 +78,7 @@ while true do
         center(energyY, formatNumber(energy) .. " EU")
 
         monitor.setTextColor(colors.gray)
-        center(labelY, "Reactor output")
+        center(labelY, "Stored energy")
 
         monitor.setBackgroundColor(colors.lime)
         monitor.setTextColor(colors.black)
@@ -80,10 +87,10 @@ while true do
         center(height, " REACTOR ONLINE ")
     else
         monitor.setTextColor(colors.red)
-        center(energyY, "NO DATA")
+        center(energyY, "NO EU DATA")
 
         monitor.setTextColor(colors.gray)
-        center(labelY, "Check reactor reader")
+        center(labelY, "Check Block Reader")
 
         monitor.setBackgroundColor(colors.red)
         monitor.setTextColor(colors.white)
