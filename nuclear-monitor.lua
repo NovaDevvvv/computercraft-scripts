@@ -14,6 +14,7 @@ monitor.setTextScale(1)
 local function center(y, text)
     local width = monitor.getSize()
     local x = math.floor((width - #text) / 2) + 1
+
     monitor.setCursorPos(math.max(1, x), y)
     monitor.write(text)
 end
@@ -33,15 +34,8 @@ local function formatNumber(value)
 end
 
 while true do
-    local ok, data = pcall(function()
-        return reader.getBlockData()
-    end)
-
-    local energy = nil
-
-    if ok and type(data) == "table" then
-        energy = tonumber(data.energy)
-    end
+    local ok, data = pcall(reader.getBlockData)
+    local energy = ok and data and tonumber(data.energy) or nil
 
     local width, height = monitor.getSize()
 
@@ -49,25 +43,25 @@ while true do
     monitor.setTextColor(colors.black)
     monitor.clear()
 
-    monitor.setBackgroundColor(colors.lime)
+    monitor.setBackgroundColor(colors.yellow)
     monitor.setTextColor(colors.black)
     monitor.setCursorPos(1, 1)
     monitor.write(string.rep(" ", width))
     center(1, " NUCLEAR POWER ")
 
     monitor.setBackgroundColor(colors.white)
-    monitor.setTextColor(colors.green)
+    monitor.setTextColor(colors.orange)
 
     if height >= 9 then
-        center(3, "   .---.   ")
-        center(4, " /  O O  \\ ")
-        center(5, "|    O    |")
-        center(6, " \\  O O  / ")
-        center(7, "   '---'   ")
+        center(3, "\\  |  /")
+        center(4, " \\ | / ")
+        center(5, "--- O ---")
+        center(6, " / | \\ ")
+        center(7, "/  |  \\")
     else
-        center(3, " O O ")
-        center(4, "  O  ")
-        center(5, " O O ")
+        center(3, "\\ | /")
+        center(4, "- O -")
+        center(5, "/ | \\")
     end
 
     local energyY = height >= 11 and 9 or 7
@@ -78,25 +72,25 @@ while true do
         center(energyY, formatNumber(energy) .. " EU")
 
         monitor.setTextColor(colors.gray)
-        center(labelY, "Stored energy")
+        center(labelY, "Nuclear energy")
 
         monitor.setBackgroundColor(colors.lime)
         monitor.setTextColor(colors.black)
         monitor.setCursorPos(1, height)
         monitor.write(string.rep(" ", width))
-        center(height, " REACTOR ONLINE ")
+        center(height, " ONLINE ")
     else
         monitor.setTextColor(colors.red)
-        center(energyY, "NO EU DATA")
+        center(energyY, "NO DATA")
 
         monitor.setTextColor(colors.gray)
-        center(labelY, "Check Block Reader")
+        center(labelY, "Check reader")
 
         monitor.setBackgroundColor(colors.red)
         monitor.setTextColor(colors.white)
         monitor.setCursorPos(1, height)
         monitor.write(string.rep(" ", width))
-        center(height, " REACTOR OFFLINE ")
+        center(height, " OFFLINE ")
     end
 
     sleep(0.5)
