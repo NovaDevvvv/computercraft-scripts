@@ -818,7 +818,10 @@ local function startupAudio()
 end
 
 local ok, problem = pcall(function()
-    parallel.waitForAny(
+    -- The startup audio task is short-lived, while managerLoop must keep
+    -- running for monitor touches. waitForAny terminated managerLoop as soon
+    -- as the chime/announcement finished, leaving the drawn UI unresponsive.
+    parallel.waitForAll(
         managerLoop,
         startupAudio
     )
