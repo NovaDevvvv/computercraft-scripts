@@ -19,6 +19,7 @@ local function readFile(path)
     end
 
     local file = fs.open(path, "r")
+
     if not file then
         return nil
     end
@@ -31,6 +32,7 @@ end
 
 local function writeFile(path, contents)
     local file = fs.open(path, "w")
+
     if not file then
         return false
     end
@@ -179,12 +181,113 @@ local function formatUptime()
     local remainingSeconds = seconds % 60
 
     if days > 0 then
-        return string.format("%dd %02dh %02dm %02ds", days, hours, minutes, remainingSeconds)
+        return string.format(
+            "%dd %02dh %02dm %02ds",
+            days,
+            hours,
+            minutes,
+            remainingSeconds
+        )
     elseif hours > 0 then
-        return string.format("%02dh %02dm %02ds", hours, minutes, remainingSeconds)
+        return string.format(
+            "%02dh %02dm %02ds",
+            hours,
+            minutes,
+            remainingSeconds
+        )
     else
-        return string.format("%02dm %02ds", minutes, remainingSeconds)
+        return string.format(
+            "%02dm %02ds",
+            minutes,
+            remainingSeconds
+        )
     end
+end
+
+local function getSpeakers()
+    local speakers = {}
+
+    for _, name in ipairs(peripheral.getNames()) do
+        if peripheral.hasType(name, "speaker") then
+            local speaker = peripheral.wrap(name)
+
+            if speaker then
+                table.insert(speakers, {
+                    name = name,
+                    device = speaker
+                })
+            end
+        end
+    end
+
+    return speakers
+end
+
+local function playTTS(text, speakers)
+    if #speakers == 0 then
+        return false, "No speakers connected"
+    end
+
+    local url =
+        "https://music.madefor.cc/tts?text="
+        .. textutils.urlEncode(text)
+        .. "&nocache="
+        .. tostring(os.epoch("utc"))
+
+    local response, errorMessage = http.get(url, {
+        ["Cache-Control"] = "no-cache",
+        ["User-Agent"] = "ComputerCraft-Base-Manager"
+    })
+
+    if not response then
+        return false, tostring(errorMessage or "TTS request failed")
+    end
+
+    if response.getResponseCode() ~= 200 then
+        local status = response.getResponseCode()
+        response.close()
+        return false, "TTS returned HTTP " .. tostring(status)
+    end
+
+    local decoder = require("cc.audio.dfpwm").make_decoder()
+
+    while true do
+        local chunk = response.read(16 * 1024)
+
+        if not chunk then
+            break
+        end
+
+        local audio = decoder(chunk)
+        local waiting = {}
+
+        for index, speakerData in ipairs(speakers) do
+            waiting[index] = true
+        end
+
+        while true do
+            local remaining = false
+
+            for index, speakerData in ipairs(speakers) do
+                if waiting[index] then
+                    if speakerData.device.playAudio(audio, 1.5) then
+                        waiting[index] = false
+                    else
+                        remaining = true
+                    end
+                end
+            end
+
+            if not remaining then
+                break
+            end
+
+            os.pullEvent("speaker_audio_empty")
+        end
+    end
+
+    response.close()
+    return true
 end
 
 checkForUpdates()
@@ -205,12 +308,22 @@ if not monitor then
     error("No monitor found")
 end
 
+local speakers = getSpeakers()
+
 monitor.setTextScale(0.5)
 monitor.setBackgroundColor(colors.black)
 monitor.setTextColor(colors.white)
 monitor.clear()
 
-local function drawScreen(doorOpen, baseCount)
+local function clearLine(y)
+    local width = monitor.getSize()
+
+    monitor.setBackgroundColor(colors.black)
+    monitor.setCursorPos(1, y)
+    monitor.write(string.rep(" ", width))
+end
+
+local function drawScreen(doorOpen, baseCount, speakerCount)
     local width, height = monitor.getSize()
 
     monitor.setBackgroundColor(colors.black)
@@ -240,6 +353,12 @@ local function drawScreen(doorOpen, baseCount)
     monitor.setTextColor(colors.yellow)
     monitor.write("Players On Base: " .. tostring(baseCount))
 
+    monitor.setCursorPos(2, 10)
+    monitor.setTextColor(colors.lightBlue)
+    monitor.write("Speakers: " .. tostring(speakerCount))
+
+    clearLine(height)
+
     local uptimeText = "Uptime: " .. formatUptime()
 
     monitor.setCursorPos(2, height)
@@ -249,28 +368,55 @@ end
 
 local previousDoorState = nil
 local previousBaseCount = nil
+local previousSpeakerCount = nil
 local previousUptime = nil
 
-while true do
-    local hallwayPlayers = detector.getPlayersInRange(DOOR_RANGE) or {}
-    local basePlayers = detector.getPlayersInRange(BASE_RANGE) or {}
+local function managerLoop()
+    while true do
+        local hallwayPlayers = detector.getPlayersInRange(DOOR_RANGE) or {}
+        local basePlayers = detector.getPlayersInRange(BASE_RANGE) or {}
 
-    local doorOpen = #hallwayPlayers > 0
-    local baseCount = #basePlayers
-    local uptime = formatUptime()
+        speakers = getSpeakers()
 
-    integrator.setOutput(OUTPUT_SIDE, doorOpen)
+        local doorOpen = #hallwayPlayers > 0
+        local baseCount = #basePlayers
+        local speakerCount = #speakers
+        local uptime = formatUptime()
 
-    if doorOpen ~= previousDoorState
-        or baseCount ~= previousBaseCount
-        or uptime ~= previousUptime then
+        integrator.setOutput(OUTPUT_SIDE, doorOpen)
 
-        drawScreen(doorOpen, baseCount)
+        if doorOpen ~= previousDoorState
+            or baseCount ~= previousBaseCount
+            or speakerCount ~= previousSpeakerCount
+            or uptime ~= previousUptime then
 
-        previousDoorState = doorOpen
-        previousBaseCount = baseCount
-        previousUptime = uptime
+            drawScreen(doorOpen, baseCount, speakerCount)
+
+            previousDoorState = doorOpen
+            previousBaseCount = baseCount
+            previousSpeakerCount = speakerCount
+            previousUptime = uptime
+        end
+
+        sleep(0.25)
     end
-
-    sleep(UPDATE_RATE)
 end
+
+local function startupVoice()
+    sleep(1)
+
+    speakers = getSpeakers()
+
+    if #speakers > 0 then
+        local success, errorMessage = playTTS(
+            "All systems online",
+            speakers
+        )
+
+        if not success then
+            print("TTS error: " .. tostring(errorMessage))
+        end
+    end
+end
+
+parallel.waitForAll(managerLoop, startupVoice)
