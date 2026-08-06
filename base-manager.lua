@@ -272,19 +272,40 @@ local function speak(text, shouldChime)
 
     local url = TTS_URL .. textutils.urlEncode(text)
 
-    -- The built-in speaker program's optional argument is a peripheral name,
-    -- not a volume. Supplying the slider value here made values such as 1.5
-    -- get treated as a nonexistent speaker name.
-    local success = shell.run(
-        "speaker",
-        "play",
-        url
-    )
+    local success, problem = pcall(function()
+        local response, requestProblem = http.get(url)
+
+        if not response then
+            error(requestProblem or "TTS download failed", 0)
+        end
+
+        local decoder = require("cc.audio.dfpwm").make_decoder()
+        local speaker = speakers[1].device
+
+        while true do
+            local chunk = response.read(16 * 1024)
+
+            if not chunk then
+                break
+            end
+
+            local audio = decoder(chunk)
+
+            while not speaker.playAudio(audio, volume) do
+                os.pullEvent("speaker_audio_empty")
+            end
+        end
+
+        response.close()
+    end)
 
     if success then
         setStatus("Finished speaking", 2)
     else
-        setStatus("Speech playback failed", 4)
+        setStatus(
+            "Speech failed: " .. tostring(problem),
+            6
+        )
     end
 
     return success
