@@ -270,7 +270,7 @@ local function playTTS(text, speakers)
 
             for index, speakerData in ipairs(speakers) do
                 if pending[index] then
-                    if speakerData.device.playAudio(audio, 1.5) then
+                    if speakerData.device.playAudio(audio, 1) then
                         pending[index] = false
                     else
                         waiting = true
