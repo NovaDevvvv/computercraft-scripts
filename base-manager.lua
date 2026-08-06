@@ -18,6 +18,7 @@ local START_TIME = os.epoch("utc")
 local activeTab = "home"
 local volume = 1.5
 local speechText = ""
+local textFocused = false
 local statusMessage = ""
 local statusUntil = 0
 
@@ -585,70 +586,6 @@ local function drawSlider()
     )
 end
 
-local keyboardRows = {
-    "QWERTYUIOP",
-    "ASDFGHJKL",
-    "ZXCVBNM"
-}
-
-local function keyboardLayout()
-    local startY = 15
-    local keyWidth = 3
-    local rows = {}
-
-    for rowIndex, characters in ipairs(keyboardRows) do
-        local rowWidth = #characters * keyWidth
-        local startX = math.max(
-            1,
-            math.floor((width - rowWidth) / 2) + 1
-        )
-
-        rows[rowIndex] = {
-            text = characters,
-            x = startX,
-            y = startY + rowIndex - 1,
-            keyWidth = keyWidth
-        }
-    end
-
-    return rows
-end
-
-local function drawKeyboard()
-    local rows = keyboardLayout()
-
-    for _, row in ipairs(rows) do
-        for index = 1, #row.text do
-            local character = row.text:sub(index, index)
-            local x = row.x + ((index - 1) * row.keyWidth)
-
-            fill(
-                x,
-                row.y,
-                row.keyWidth - 1,
-                1,
-                colors.gray
-            )
-
-            writeAt(
-                x,
-                row.y,
-                character,
-                colors.white,
-                colors.gray
-            )
-        end
-    end
-
-    local controlsY = 19
-
-    if controlsY < height then
-        button(2, controlsY, 8, "SPACE", false)
-        button(11, controlsY, 7, "BACK", false)
-        button(19, controlsY, 8, "CLEAR", false)
-    end
-end
-
 local function drawSound()
     drawHeader("SOUND CONTROL")
 
@@ -666,21 +603,23 @@ local function drawSound()
         12,
         math.max(1, width - 12),
         1,
-        colors.gray
+        textFocused and colors.lightGray or colors.gray
     )
 
     local visibleText = speechText
 
     if visibleText == "" then
-        visibleText = "Touch keys below"
+        visibleText = "Click here, then type"
     end
 
     writeAt(
         3,
         12,
         visibleText:sub(1, math.max(1, width - 14)),
-        speechText == "" and colors.lightGray or colors.white,
-        colors.gray
+        textFocused
+            and colors.black
+            or (speechText == "" and colors.lightGray or colors.white),
+        textFocused and colors.lightGray or colors.gray
     )
 
     button(
@@ -690,8 +629,6 @@ local function drawSound()
         "SPEAK",
         false
     )
-
-    drawKeyboard()
 
     if statusMessage ~= "" and os.clock() < statusUntil then
         writeAt(
@@ -747,61 +684,13 @@ local function inside(x, y, left, top, right, bottom)
         and y <= bottom
 end
 
-local function handleKeyboardTouch(x, y)
-    local rows = keyboardLayout()
-
-    for _, row in ipairs(rows) do
-        if y == row.y then
-            for index = 1, #row.text do
-                local keyX =
-                    row.x
-                    + ((index - 1) * row.keyWidth)
-
-                if x >= keyX and x <= keyX + row.keyWidth - 2 then
-                    local character =
-                        row.text:sub(index, index)
-
-                    if #speechText < 100 then
-                        speechText = speechText .. character
-                    end
-
-                    return true
-                end
-            end
-        end
-    end
-
-    local controlsY = 19
-
-    if y == controlsY then
-        if x >= 2 and x <= 9 then
-            if #speechText < 100 then
-                speechText = speechText .. " "
-            end
-
-            return true
-        elseif x >= 11 and x <= 17 then
-            speechText = speechText:sub(
-                1,
-                math.max(0, #speechText - 1)
-            )
-
-            return true
-        elseif x >= 19 and x <= 26 then
-            speechText = ""
-            return true
-        end
-    end
-
-    return false
-end
-
 local function handleTouch(x, y)
     local tabWidth = math.floor(width / 2)
 
     if y == height then
         if x <= tabWidth then
             activeTab = "home"
+            textFocused = false
         else
             activeTab = "sound"
         end
@@ -811,6 +700,20 @@ local function handleTouch(x, y)
     end
 
     if activeTab ~= "sound" then
+        return
+    end
+
+    if inside(
+        x,
+        y,
+        2,
+        12,
+        math.max(2, width - 10),
+        12
+    ) then
+
+        textFocused = true
+        redraw()
         return
     end
 
@@ -844,10 +747,6 @@ local function handleTouch(x, y)
         redraw()
         return
     end
-
-    if handleKeyboardTouch(x, y) then
-        redraw()
-    end
 end
 
 local function managerLoop()
@@ -869,6 +768,39 @@ local function managerLoop()
             and first == monitorName then
 
             handleTouch(second, third)
+
+        elseif event == "char"
+            and activeTab == "sound"
+            and textFocused then
+
+            if #speechText < 100 then
+                speechText = speechText .. first
+                redraw()
+            end
+
+        elseif event == "paste"
+            and activeTab == "sound"
+            and textFocused then
+
+            speechText = (speechText .. first):sub(1, 100)
+            redraw()
+
+        elseif event == "key"
+            and activeTab == "sound"
+            and textFocused then
+
+            if first == keys.backspace then
+                speechText = speechText:sub(1, -2)
+                redraw()
+            elseif first == keys.delete then
+                speechText = ""
+                redraw()
+            elseif first == keys.enter
+                or first == keys.numPadEnter then
+
+                queueSpeech(speechText)
+                redraw()
+            end
 
         elseif event == "peripheral"
             or event == "peripheral_detach" then
