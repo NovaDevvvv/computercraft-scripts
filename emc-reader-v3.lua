@@ -19,7 +19,7 @@ monitor.setTextScale(0.5)
 monitor.setBackgroundColor(colors.black)
 monitor.clear()
 
-local previousCount = nil
+local previousAmount = nil
 local previousTime = os.epoch("utc") / 1000
 local itemsPerSecond = 0
 
@@ -72,15 +72,22 @@ while true do
         and data.handler.BigItems
         and data.handler.BigItems["0"]
 
-    local stack = slot and slot.Stack
-    local itemId = stack and stack.id or "minecraft:air"
-    local count = slot and slot.Amount or 0
+    local itemId = "minecraft:air"
+    local amount = 0
+
+    if slot then
+        amount = slot.Amount or 0
+
+        if slot.Stack then
+            itemId = slot.Stack.id or "minecraft:air"
+        end
+    end
 
     local currentTime = os.epoch("utc") / 1000
     local elapsed = currentTime - previousTime
 
-    if previousCount ~= nil and elapsed > 0 then
-        local gained = count - previousCount
+    if previousAmount ~= nil and elapsed > 0 then
+        local gained = amount - previousAmount
 
         if gained >= 0 then
             local currentRate = gained / elapsed
@@ -90,10 +97,10 @@ while true do
         end
     end
 
-    previousCount = count
+    previousAmount = amount
     previousTime = currentTime
 
-    local totalEmc = count * emcPerItem
+    local totalEmc = amount * emcPerItem
     local itemsPerMinute = itemsPerSecond * 60
     local itemsPerHour = itemsPerSecond * 3600
     local emcPerMinute = itemsPerMinute * emcPerItem
@@ -107,11 +114,11 @@ while true do
 
     monitor.setCursorPos(2, 5)
     monitor.setTextColor(colors.lightGray)
-    monitor.write("Count")
+    monitor.write("Amount")
 
     monitor.setCursorPos(2, 6)
     monitor.setTextColor(colors.lime)
-    monitor.write(formatNumber(count))
+    monitor.write(formatNumber(amount))
 
     monitor.setCursorPos(2, 8)
     monitor.setTextColor(colors.lightGray)
