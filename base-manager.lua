@@ -11,6 +11,7 @@ local BASE_RANGE = 100
 local OUTPUT_SIDE = "down"
 local UPDATE_RATE = 0.25
 
+local TTS_URL = "https://music.madefor.cc/tts?text="
 local START_TIME = os.epoch("utc")
 
 local function readFile(path)
@@ -44,14 +45,14 @@ local function writeFile(path, contents)
 end
 
 local function request(url)
-    local response, errorMessage = http.get(url, {
+    local response, problem = http.get(url, {
         ["Cache-Control"] = "no-cache, no-store, must-revalidate",
         ["Pragma"] = "no-cache",
         ["User-Agent"] = "ComputerCraft-Base-Manager"
     })
 
     if not response then
-        return nil, tostring(errorMessage or "Request failed")
+        return nil, tostring(problem or "Request failed")
     end
 
     local status = response.getResponseCode()
@@ -70,7 +71,7 @@ local function checkForUpdates()
     term.setCursorPos(1, 1)
 
     if not http then
-        print("HTTP is disabled")
+        printError("HTTP is disabled")
         sleep(2)
         return
     end
@@ -87,19 +88,19 @@ local function checkForUpdates()
         .. "?nocache="
         .. tostring(os.epoch("utc"))
 
-    local commitBody, commitError = request(commitURL)
+    local commitBody, commitProblem = request(commitURL)
 
     if not commitBody then
-        print("Update check failed:")
-        print(commitError)
+        printError("Update check failed")
+        printError(commitProblem)
         sleep(2)
         return
     end
 
-    local commitData = textutils.unserializeJSON(commitBody)
+    local commitData = textutils.unserialiseJSON(commitBody)
 
-    if not commitData or not commitData.sha then
-        print("Invalid GitHub response")
+    if not commitData or type(commitData.sha) ~= "string" then
+        printError("Invalid GitHub response")
         sleep(2)
         return
     end
@@ -125,17 +126,17 @@ local function checkForUpdates()
         .. "/"
         .. REMOTE_FILE
 
-    local remoteCode, downloadError = request(downloadURL)
+    local remoteCode, downloadProblem = request(downloadURL)
 
     if not remoteCode then
-        print("Download failed:")
-        print(downloadError)
+        printError("Download failed")
+        printError(downloadProblem)
         sleep(2)
         return
     end
 
     if #remoteCode < 100 then
-        print("Downloaded file is invalid")
+        printError("Downloaded file is invalid")
         sleep(2)
         return
     end
@@ -147,14 +148,14 @@ local function checkForUpdates()
     end
 
     if not writeFile(temporaryPath, remoteCode) then
-        print("Could not save update")
+        printError("Could not save update")
         sleep(2)
         return
     end
 
     if readFile(temporaryPath) ~= remoteCode then
         fs.delete(temporaryPath)
-        print("Update verification failed")
+        printError("Update verification failed")
         sleep(2)
         return
     end
@@ -197,13 +198,13 @@ local function formatUptime()
             minutes,
             remainingSeconds
         )
-    else
-        return string.format(
-            "%02dm %02ds",
-            minutes,
-            remainingSeconds
-        )
     end
+
+    return string.format(
+        "%02dm %02ds",
+        minutes,
+        remainingSeconds
+    )
 end
 
 local function getSpeakerCount()
@@ -218,19 +219,14 @@ local function getSpeakerCount()
     return count
 end
 
-local function playTTS(text)
-    if getSpeakerCount() == 0 then
-        return false, "No speakers connected"
-    end
+local function speak(text, description)
+    print("Speaking " .. description)
 
-    local url =
-        "https://music.madefor.cc/tts?text="
-        .. textutils.urlEncode(text)
+    local url = TTS_URL .. textutils.urlEncode(text)
 
-    local success = shell.run("speaker", "play", url)
-
-    if not success then
-        return false, "speaker play failed"
+    if not shell.run("speaker", "play", url) then
+        printError("Could not play " .. description)
+        return false
     end
 
     return true
@@ -243,27 +239,35 @@ local integrator = peripheral.find("redstoneIntegrator")
 local monitor = peripheral.find("monitor")
 
 if not detector then
-    error("No Player Detector found")
+    error("No Player Detector found", 0)
 end
 
 if not integrator then
-    error("No Redstone Integrator found")
+    error("No Redstone Integrator found", 0)
 end
 
 if not monitor then
-    error("No monitor found")
+    error("No monitor found", 0)
 end
 
 monitor.setTextScale(0.5)
+monitor.setCursorBlink(false)
 monitor.setBackgroundColor(colors.black)
 monitor.setTextColor(colors.white)
 monitor.clear()
 
+local function writeAt(x, y, text, foreground, background)
+    monitor.setCursorPos(x, y)
+    monitor.setTextColor(foreground or colors.white)
+    monitor.setBackgroundColor(background or colors.black)
+    monitor.write(text)
+end
+
 local function clearLine(y)
     local width = monitor.getSize()
 
-    monitor.setBackgroundColor(colors.black)
     monitor.setCursorPos(1, y)
+    monitor.setBackgroundColor(colors.black)
     monitor.write(string.rep(" ", width))
 end
 
@@ -273,42 +277,46 @@ local function drawScreen(doorOpen, baseCount, speakerCount)
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
 
-    monitor.setCursorPos(2, 2)
-    monitor.setTextColor(colors.cyan)
-    monitor.write("BASE MANAGER")
+    writeAt(2, 2, "BASE MANAGER", colors.cyan)
 
-    monitor.setCursorPos(2, 4)
-    monitor.setTextColor(colors.gray)
-    monitor.write(string.rep("-", math.max(1, width - 3)))
+    writeAt(
+        2,
+        4,
+        string.rep("-", math.max(1, width - 3)),
+        colors.gray
+    )
 
-    monitor.setCursorPos(2, 6)
-    monitor.setTextColor(colors.white)
-    monitor.write(DOOR_NAME .. ": ")
+    writeAt(2, 6, DOOR_NAME .. ": ", colors.white)
 
     if doorOpen then
-        monitor.setTextColor(colors.lime)
-        monitor.write("OPEN")
+        writeAt(2 + #DOOR_NAME + 2, 6, "OPEN", colors.lime)
     else
-        monitor.setTextColor(colors.red)
-        monitor.write("CLOSED")
+        writeAt(2 + #DOOR_NAME + 2, 6, "CLOSED", colors.red)
     end
 
-    monitor.setCursorPos(2, 8)
-    monitor.setTextColor(colors.yellow)
-    monitor.write("Players On Base: " .. tostring(baseCount))
+    writeAt(
+        2,
+        8,
+        "Players On Base: " .. tostring(baseCount),
+        colors.yellow
+    )
 
-    monitor.setCursorPos(2, 10)
-    monitor.setTextColor(colors.lightBlue)
-    monitor.write("Speakers: " .. tostring(speakerCount))
+    writeAt(
+        2,
+        10,
+        "Speakers: " .. tostring(speakerCount),
+        colors.lightBlue
+    )
 
     clearLine(height)
 
     local uptimeText = "Uptime: " .. formatUptime()
 
-    monitor.setCursorPos(2, height)
-    monitor.setTextColor(colors.gray)
-    monitor.write(
-        uptimeText:sub(1, math.max(0, width - 1))
+    writeAt(
+        2,
+        height,
+        uptimeText:sub(1, math.max(0, width - 1)),
+        colors.gray
     )
 end
 
@@ -356,15 +364,26 @@ end
 local function startupVoice()
     sleep(2)
 
-    local success, errorMessage =
-        playTTS("All systems online")
-
-    if not success then
-        print("TTS error: " .. tostring(errorMessage))
+    if getSpeakerCount() == 0 then
+        printError("No speakers connected")
+        return
     end
+
+    speak(
+        "All systems online",
+        "startup announcement"
+    )
 end
 
-parallel.waitForAll(
-    managerLoop,
-    startupVoice
-)
+local ok, problem = pcall(function()
+    parallel.waitForAll(
+        managerLoop,
+        startupVoice
+    )
+end)
+
+integrator.setOutput(OUTPUT_SIDE, false)
+
+if not ok and tostring(problem) ~= "Terminated" then
+    printError(problem)
+end
