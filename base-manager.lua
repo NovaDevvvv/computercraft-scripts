@@ -11,13 +11,14 @@ local BASE_RANGE = 100
 local OUTPUT_SIDE = "down"
 local UPDATE_RATE = 0.25
 
+local START_TIME = os.epoch("utc")
+
 local function readFile(path)
     if not fs.exists(path) then
         return nil
     end
 
     local file = fs.open(path, "r")
-
     if not file then
         return nil
     end
@@ -30,7 +31,6 @@ end
 
 local function writeFile(path, contents)
     local file = fs.open(path, "w")
-
     if not file then
         return false
     end
@@ -167,8 +167,24 @@ local function checkForUpdates()
     print("Update installed")
     print("Restarting...")
     sleep(1)
-
     os.reboot()
+end
+
+local function formatUptime()
+    local seconds = math.floor((os.epoch("utc") - START_TIME) / 1000)
+
+    local days = math.floor(seconds / 86400)
+    local hours = math.floor((seconds % 86400) / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    local remainingSeconds = seconds % 60
+
+    if days > 0 then
+        return string.format("%dd %02dh %02dm %02ds", days, hours, minutes, remainingSeconds)
+    elseif hours > 0 then
+        return string.format("%02dh %02dm %02ds", hours, minutes, remainingSeconds)
+    else
+        return string.format("%02dm %02ds", minutes, remainingSeconds)
+    end
 end
 
 checkForUpdates()
@@ -195,7 +211,7 @@ monitor.setTextColor(colors.white)
 monitor.clear()
 
 local function drawScreen(doorOpen, baseCount)
-    local width = monitor.getSize()
+    local width, height = monitor.getSize()
 
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
@@ -223,10 +239,17 @@ local function drawScreen(doorOpen, baseCount)
     monitor.setCursorPos(2, 8)
     monitor.setTextColor(colors.yellow)
     monitor.write("Players On Base: " .. tostring(baseCount))
+
+    local uptimeText = "Uptime: " .. formatUptime()
+
+    monitor.setCursorPos(2, height)
+    monitor.setTextColor(colors.gray)
+    monitor.write(uptimeText:sub(1, math.max(0, width - 1)))
 end
 
 local previousDoorState = nil
 local previousBaseCount = nil
+local previousUptime = nil
 
 while true do
     local hallwayPlayers = detector.getPlayersInRange(DOOR_RANGE) or {}
@@ -234,14 +257,19 @@ while true do
 
     local doorOpen = #hallwayPlayers > 0
     local baseCount = #basePlayers
+    local uptime = formatUptime()
 
     integrator.setOutput(OUTPUT_SIDE, doorOpen)
 
-    if doorOpen ~= previousDoorState or baseCount ~= previousBaseCount then
+    if doorOpen ~= previousDoorState
+        or baseCount ~= previousBaseCount
+        or uptime ~= previousUptime then
+
         drawScreen(doorOpen, baseCount)
 
         previousDoorState = doorOpen
         previousBaseCount = baseCount
+        previousUptime = uptime
     end
 
     sleep(UPDATE_RATE)
