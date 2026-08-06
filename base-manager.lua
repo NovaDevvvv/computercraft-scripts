@@ -272,12 +272,13 @@ local function speak(text, shouldChime)
 
     local url = TTS_URL .. textutils.urlEncode(text)
 
-    -- The built-in speaker program accepts the volume as its second argument.
+    -- The built-in speaker program's optional argument is a peripheral name,
+    -- not a volume. Supplying the slider value here made values such as 1.5
+    -- get treated as a nonexistent speaker name.
     local success = shell.run(
         "speaker",
         "play",
-        url,
-        tostring(volume)
+        url
     )
 
     if success then
