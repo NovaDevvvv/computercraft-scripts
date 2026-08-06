@@ -12,7 +12,18 @@ local OUTPUT_SIDE = "down"
 local UPDATE_RATE = 0.25
 
 local TTS_URL = "https://music.madefor.cc/tts?text="
+
 local START_TIME = os.epoch("utc")
+
+local activeTab = "home"
+local volume = 1.5
+local speechText = ""
+local statusMessage = ""
+local statusUntil = 0
+
+local doorOpen = false
+local baseCount = 0
+local speakerCount = 0
 
 local function readFile(path)
     if not fs.exists(path) then
@@ -212,73 +223,80 @@ local function getSpeakers()
 
     for _, name in ipairs(peripheral.getNames()) do
         if peripheral.hasType(name, "speaker") then
-            local speaker = peripheral.wrap(name)
-
-            if speaker then
-                table.insert(speakers, {
-                    name = name,
-                    device = speaker
-                })
-            end
+            table.insert(speakers, {
+                name = name,
+                device = peripheral.wrap(name)
+            })
         end
     end
 
     return speakers
 end
 
-local function playNoteOnEverySpeaker(instrument, volume, pitch)
-    local speakers = getSpeakers()
+local function setStatus(message, duration)
+    statusMessage = message
+    statusUntil = os.clock() + (duration or 3)
+end
 
-    for _, speakerData in ipairs(speakers) do
-        speakerData.device.playNote(
-            instrument or "harp",
-            volume or 2,
-            pitch or 12
-        )
+local function speak(text)
+    if text == nil or text == "" then
+        setStatus("Enter some text first", 3)
+        return false
     end
-end
 
-local function playStartupChime()
-    playNoteOnEverySpeaker("bell", 2, 12)
-    sleep(0.15)
-
-    playNoteOnEverySpeaker("bell", 2, 16)
-    sleep(0.15)
-
-    playNoteOnEverySpeaker("bell", 2, 20)
-end
-
-local function speak(text, description)
     local speakers = getSpeakers()
 
     if #speakers == 0 then
-        printError("No speakers connected")
+        setStatus("No speakers connected", 3)
         return false
     end
 
-    print("Speaking " .. description)
+    setStatus("Speaking...", 10)
 
     local url = TTS_URL .. textutils.urlEncode(text)
 
+    -- The built-in speaker program accepts the volume as its second argument.
     local success = shell.run(
         "speaker",
         "play",
-        url
+        url,
+        tostring(volume)
     )
 
-    if not success then
-        printError("Could not play " .. description)
-        return false
+    if success then
+        setStatus("Finished speaking", 2)
+    else
+        setStatus("Speech playback failed", 4)
     end
 
-    return true
+    return success
+end
+
+local function playStartupChime()
+    local speakers = getSpeakers()
+
+    for _, speaker in ipairs(speakers) do
+        speaker.device.playNote("bell", 1.5, 12)
+    end
+
+    sleep(0.15)
+
+    for _, speaker in ipairs(speakers) do
+        speaker.device.playNote("bell", 1.5, 16)
+    end
+
+    sleep(0.15)
+
+    for _, speaker in ipairs(speakers) do
+        speaker.device.playNote("bell", 1.5, 20)
+    end
 end
 
 checkForUpdates()
 
 local detector = peripheral.find("playerDetector")
 local integrator = peripheral.find("redstoneIntegrator")
-local monitor = peripheral.find("monitor")
+local monitor, monitorName = peripheral.find("monitor")
 
 if not detector then
     error("No Player Detector found", 0)
@@ -298,32 +316,100 @@ monitor.setBackgroundColor(colors.black)
 monitor.setTextColor(colors.white)
 monitor.clear()
 
+local width, height = monitor.getSize()
+
 local function writeAt(x, y, text, foreground, background)
-    monitor.setCursorPos(x, y)
+    if y < 1 or y > height then
+        return
+    end
+
+    text = tostring(text or "")
+
+    monitor.setCursorPos(math.max(1, x), y)
     monitor.setTextColor(foreground or colors.white)
     monitor.setBackgroundColor(background or colors.black)
     monitor.write(text)
 end
 
-local function drawScreen(doorOpen, baseCount, speakerCount)
-    local width, height = monitor.getSize()
+local function fill(x, y, fillWidth, fillHeight, background)
+    monitor.setBackgroundColor(background)
 
-    monitor.setBackgroundColor(colors.black)
-    monitor.clear()
+    for row = y, y + fillHeight - 1 do
+        if row >= 1 and row <= height then
+            monitor.setCursorPos(math.max(1, x), row)
+            monitor.write(string.rep(" ", math.max(0, fillWidth)))
+        end
+    end
+end
+
+local function button(x, y, buttonWidth, text, selected)
+    local background = selected and colors.cyan or colors.gray
+    local foreground = selected and colors.black or colors.white
+
+    fill(x, y, buttonWidth, 1, background)
+
+    local textX =
+        x + math.floor((buttonWidth - #text) / 2)
+
+    writeAt(
+        textX,
+        y,
+        text,
+        foreground,
+        background
+    )
+end
+
+local function drawTabs()
+    local tabWidth = math.floor(width / 2)
+
+    button(
+        1,
+        height,
+        tabWidth,
+        "HOME",
+        activeTab == "home"
+    )
+
+    button(
+        tabWidth + 1,
+        height,
+        width - tabWidth,
+        "SOUND",
+        activeTab == "sound"
+    )
+end
+
+local function drawHeader(title)
+    fill(1, 1, width, height, colors.black)
 
     writeAt(
         2,
         2,
         "BASE MANAGER",
-        colors.cyan
+        colors.cyan,
+        colors.black
+    )
+
+    writeAt(
+        2,
+        3,
+        title,
+        colors.lightGray,
+        colors.black
     )
 
     writeAt(
         2,
         4,
         string.rep("-", math.max(1, width - 3)),
-        colors.gray
+        colors.gray,
+        colors.black
     )
+end
+
+local function drawHome()
+    drawHeader("HOME")
 
     writeAt(
         2,
@@ -364,104 +450,382 @@ local function drawScreen(doorOpen, baseCount, speakerCount)
         colors.lightBlue
     )
 
-    monitor.setCursorPos(1, height)
-    monitor.setBackgroundColor(colors.black)
-    monitor.write(string.rep(" ", width))
+    writeAt(
+        2,
+        height - 2,
+        "Uptime: " .. formatUptime(),
+        colors.gray
+    )
 
-    local uptimeText =
-        "Uptime: " .. formatUptime()
+    drawTabs()
+end
+
+local function getSliderBounds()
+    return 4, math.max(5, width - 3)
+end
+
+local function drawSlider()
+    local sliderStart, sliderEnd = getSliderBounds()
+    local sliderWidth = sliderEnd - sliderStart
 
     writeAt(
         2,
-        height,
-        uptimeText:sub(1, math.max(0, width - 1)),
+        6,
+        "Volume: " .. string.format("%.1f", volume),
+        colors.white
+    )
+
+    writeAt(
+        sliderStart,
+        8,
+        string.rep("-", sliderWidth + 1),
+        colors.gray
+    )
+
+    local position =
+        sliderStart
+        + math.floor((volume / 3) * sliderWidth)
+
+    writeAt(
+        position,
+        8,
+        "#",
+        colors.lime
+    )
+
+    writeAt(
+        sliderStart,
+        9,
+        "0",
+        colors.gray
+    )
+
+    writeAt(
+        sliderEnd,
+        9,
+        "3",
         colors.gray
     )
 end
 
-local previousDoorState = nil
-local previousBaseCount = nil
-local previousSpeakerCount = nil
-local previousUptime = nil
+local keyboardRows = {
+    "QWERTYUIOP",
+    "ASDFGHJKL",
+    "ZXCVBNM"
+}
 
-local function managerLoop()
-    while true do
-        local hallwayPlayers =
-            detector.getPlayersInRange(DOOR_RANGE) or {}
+local function keyboardLayout()
+    local startY = 15
+    local keyWidth = 3
+    local rows = {}
 
-        local basePlayers =
-            detector.getPlayersInRange(BASE_RANGE) or {}
-
-        local doorOpen = #hallwayPlayers > 0
-        local baseCount = #basePlayers
-        local speakerCount = #getSpeakers()
-        local uptime = formatUptime()
-
-        integrator.setOutput(
-            OUTPUT_SIDE,
-            doorOpen
+    for rowIndex, characters in ipairs(keyboardRows) do
+        local rowWidth = #characters * keyWidth
+        local startX = math.max(
+            1,
+            math.floor((width - rowWidth) / 2) + 1
         )
 
-        if doorOpen ~= previousDoorState
-            or baseCount ~= previousBaseCount
-            or speakerCount ~= previousSpeakerCount
-            or uptime ~= previousUptime then
+        rows[rowIndex] = {
+            text = characters,
+            x = startX,
+            y = startY + rowIndex - 1,
+            keyWidth = keyWidth
+        }
+    end
 
-            drawScreen(
-                doorOpen,
-                baseCount,
-                speakerCount
+    return rows
+end
+
+local function drawKeyboard()
+    local rows = keyboardLayout()
+
+    for _, row in ipairs(rows) do
+        for index = 1, #row.text do
+            local character = row.text:sub(index, index)
+            local x = row.x + ((index - 1) * row.keyWidth)
+
+            fill(
+                x,
+                row.y,
+                row.keyWidth - 1,
+                1,
+                colors.gray
             )
 
-            previousDoorState = doorOpen
-            previousBaseCount = baseCount
-            previousSpeakerCount = speakerCount
-            previousUptime = uptime
+            writeAt(
+                x,
+                row.y,
+                character,
+                colors.white,
+                colors.gray
+            )
+        end
+    end
+
+    local controlsY = 19
+
+    if controlsY < height then
+        button(2, controlsY, 8, "SPACE", false)
+        button(11, controlsY, 7, "BACK", false)
+        button(19, controlsY, 8, "CLEAR", false)
+    end
+end
+
+local function drawSound()
+    drawHeader("SOUND CONTROL")
+
+    drawSlider()
+
+    writeAt(
+        2,
+        11,
+        "Text:",
+        colors.lightGray
+    )
+
+    fill(
+        2,
+        12,
+        math.max(1, width - 12),
+        1,
+        colors.gray
+    )
+
+    local visibleText = speechText
+
+    if visibleText == "" then
+        visibleText = "Touch keys below"
+    end
+
+    writeAt(
+        3,
+        12,
+        visibleText:sub(1, math.max(1, width - 14)),
+        speechText == "" and colors.lightGray or colors.white,
+        colors.gray
+    )
+
+    button(
+        math.max(2, width - 8),
+        12,
+        7,
+        "SPEAK",
+        false
+    )
+
+    drawKeyboard()
+
+    if statusMessage ~= "" and os.clock() < statusUntil then
+        writeAt(
+            2,
+            height - 2,
+            statusMessage:sub(1, width - 2),
+            colors.yellow
+        )
+    else
+        writeAt(
+            2,
+            height - 2,
+            "Speakers: " .. tostring(speakerCount),
+            colors.gray
+        )
+    end
+
+    drawTabs()
+end
+
+local function redraw()
+    width, height = monitor.getSize()
+
+    if activeTab == "sound" then
+        drawSound()
+    else
+        drawHome()
+    end
+end
+
+local function updateBaseState()
+    local hallwayPlayers =
+        detector.getPlayersInRange(DOOR_RANGE) or {}
+
+    local basePlayers =
+        detector.getPlayersInRange(BASE_RANGE) or {}
+
+    doorOpen = #hallwayPlayers > 0
+    baseCount = #basePlayers
+    speakerCount = #getSpeakers()
+
+    integrator.setOutput(
+        OUTPUT_SIDE,
+        doorOpen
+    )
+end
+
+local function inside(x, y, left, top, right, bottom)
+    return
+        x >= left
+        and x <= right
+        and y >= top
+        and y <= bottom
+end
+
+local function handleKeyboardTouch(x, y)
+    local rows = keyboardLayout()
+
+    for _, row in ipairs(rows) do
+        if y == row.y then
+            for index = 1, #row.text do
+                local keyX =
+                    row.x
+                    + ((index - 1) * row.keyWidth)
+
+                if x >= keyX and x <= keyX + row.keyWidth - 2 then
+                    local character =
+                        row.text:sub(index, index)
+
+                    if #speechText < 100 then
+                        speechText = speechText .. character
+                    end
+
+                    return true
+                end
+            end
+        end
+    end
+
+    local controlsY = 19
+
+    if y == controlsY then
+        if x >= 2 and x <= 9 then
+            if #speechText < 100 then
+                speechText = speechText .. " "
+            end
+
+            return true
+        elseif x >= 11 and x <= 17 then
+            speechText = speechText:sub(
+                1,
+                math.max(0, #speechText - 1)
+            )
+
+            return true
+        elseif x >= 19 and x <= 26 then
+            speechText = ""
+            return true
+        end
+    end
+
+    return false
+end
+
+local function handleTouch(x, y)
+    local tabWidth = math.floor(width / 2)
+
+    if y == height then
+        if x <= tabWidth then
+            activeTab = "home"
+        else
+            activeTab = "sound"
         end
 
-        sleep(UPDATE_RATE)
+        redraw()
+        return
+    end
+
+    if activeTab ~= "sound" then
+        return
+    end
+
+    local sliderStart, sliderEnd = getSliderBounds()
+
+    if y >= 7 and y <= 9
+        and x >= sliderStart
+        and x <= sliderEnd then
+
+        volume =
+            ((x - sliderStart)
+            / math.max(1, sliderEnd - sliderStart))
+            * 3
+
+        volume =
+            math.floor(volume * 10 + 0.5) / 10
+
+        redraw()
+        return
+    end
+
+    if inside(
+        x,
+        y,
+        math.max(2, width - 8),
+        12,
+        width - 2,
+        12
+    ) then
+        redraw()
+        speak(speechText)
+        redraw()
+        return
+    end
+
+    if handleKeyboardTouch(x, y) then
+        redraw()
+    end
+end
+
+local function managerLoop()
+    updateBaseState()
+    redraw()
+
+    local timer = os.startTimer(UPDATE_RATE)
+
+    while true do
+        local event, first, second, third =
+            os.pullEvent()
+
+        if event == "timer" and first == timer then
+            updateBaseState()
+            redraw()
+            timer = os.startTimer(UPDATE_RATE)
+
+        elseif event == "monitor_touch"
+            and first == monitorName then
+
+            handleTouch(second, third)
+
+        elseif event == "peripheral"
+            or event == "peripheral_detach" then
+
+            updateBaseState()
+            redraw()
+        end
     end
 end
 
 local function startupAudio()
     sleep(2)
 
-    local speakers = getSpeakers()
+    speakerCount = #getSpeakers()
 
-    if #speakers == 0 then
-        printError("No speakers connected")
+    if speakerCount == 0 then
         return
-    end
-
-    print(
-        "Connected speakers: "
-        .. tostring(#speakers)
-    )
-
-    for _, speakerData in ipairs(speakers) do
-        print(" - " .. speakerData.name)
     end
 
     playStartupChime()
     sleep(0.4)
 
-    speak(
-        "All systems online",
-        "startup announcement"
-    )
+    speak("All systems online")
 end
 
 local ok, problem = pcall(function()
-    parallel.waitForAll(
+    parallel.waitForAny(
         managerLoop,
         startupAudio
     )
 end)
 
-integrator.setOutput(
-    OUTPUT_SIDE,
-    false
-)
+integrator.setOutput(OUTPUT_SIDE, false)
 
 if not ok and tostring(problem) ~= "Terminated" then
     printError(problem)
