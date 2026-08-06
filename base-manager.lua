@@ -1,5 +1,9 @@
-local UPDATE_URL = "https://raw.githubusercontent.com/NovaDevvvv/computercraft-scripts/refs/heads/main/base-manager.lua"
-local PROGRAM_PATH = shell.getRunningProgram()
+local REPOSITORY = "NovaDevvvv/computercraft-scripts"
+local BRANCH = "main"
+local REMOTE_FILE = "base-manager.lua"
+
+local PROGRAM_PATH = "/base-manager.lua"
+local VERSION_PATH = "/base-manager.version"
 
 local DOOR_NAME = "Hallway 1"
 local DOOR_RANGE = 10
@@ -9,18 +13,19 @@ local UPDATE_RATE = 0.25
 
 local function readFile(path)
     if not fs.exists(path) then
-        return ""
+        return nil
     end
 
     local file = fs.open(path, "r")
+
     if not file then
-        return ""
+        return nil
     end
 
     local contents = file.readAll()
     file.close()
 
-    return contents or ""
+    return contents
 end
 
 local function writeFile(path, contents)
@@ -36,98 +41,136 @@ local function writeFile(path, contents)
     return true
 end
 
-local function checkForUpdates()
-    if not http then
-        print("HTTP is disabled")
-        sleep(1)
-        return
-    end
-
-    term.clear()
-    term.setCursorPos(1, 1)
-    print("Checking for updates...")
-
-    local cacheKey = tostring(os.epoch("utc")) .. "-" .. tostring(math.random(100000, 999999))
-    local url = UPDATE_URL .. "?nocache=" .. cacheKey
-
+local function request(url)
     local response, errorMessage = http.get(url, {
         ["Cache-Control"] = "no-cache, no-store, must-revalidate",
         ["Pragma"] = "no-cache",
-        ["Expires"] = "0",
-        ["User-Agent"] = "CC-Base-Manager"
+        ["User-Agent"] = "ComputerCraft-Base-Manager"
     })
 
     if not response then
-        print("Update check failed")
-        print(tostring(errorMessage or "Unknown error"))
-        sleep(1)
-        return
+        return nil, tostring(errorMessage or "Request failed")
     end
 
-    local responseCode = response.getResponseCode()
-    local remoteCode = response.readAll()
+    local status = response.getResponseCode()
+    local body = response.readAll()
     response.close()
 
-    if responseCode ~= 200 then
-        print("GitHub returned HTTP " .. tostring(responseCode))
+    if status ~= 200 then
+        return nil, "HTTP " .. tostring(status)
+    end
+
+    return body
+end
+
+local function checkForUpdates()
+    term.clear()
+    term.setCursorPos(1, 1)
+
+    if not http then
+        print("HTTP is disabled")
+        sleep(2)
+        return
+    end
+
+    print("BASE MANAGER")
+    print("")
+    print("Checking for updates...")
+
+    local commitURL =
+        "https://api.github.com/repos/"
+        .. REPOSITORY
+        .. "/commits/"
+        .. BRANCH
+        .. "?nocache="
+        .. tostring(os.epoch("utc"))
+
+    local commitBody, commitError = request(commitURL)
+
+    if not commitBody then
+        print("Update check failed:")
+        print(commitError)
+        sleep(2)
+        return
+    end
+
+    local commitData = textutils.unserializeJSON(commitBody)
+
+    if not commitData or not commitData.sha then
+        print("Invalid GitHub response")
+        sleep(2)
+        return
+    end
+
+    local latestVersion = commitData.sha
+    local installedVersion = readFile(VERSION_PATH)
+
+    if installedVersion == latestVersion then
+        print("Version: " .. latestVersion:sub(1, 7))
+        print("Up to date")
         sleep(1)
         return
     end
 
-    if not remoteCode or #remoteCode < 100 then
-        print("Downloaded update was invalid")
-        sleep(1)
+    print("New version: " .. latestVersion:sub(1, 7))
+    print("Downloading...")
+
+    local downloadURL =
+        "https://raw.githubusercontent.com/"
+        .. REPOSITORY
+        .. "/"
+        .. latestVersion
+        .. "/"
+        .. REMOTE_FILE
+
+    local remoteCode, downloadError = request(downloadURL)
+
+    if not remoteCode then
+        print("Download failed:")
+        print(downloadError)
+        sleep(2)
         return
     end
 
-    local localCode = readFile(PROGRAM_PATH)
-
-    if remoteCode == localCode then
-        print("Base Manager is up to date")
-        sleep(1)
+    if #remoteCode < 100 then
+        print("Downloaded file is invalid")
+        sleep(2)
         return
     end
 
     local temporaryPath = PROGRAM_PATH .. ".new"
-    local backupPath = PROGRAM_PATH .. ".old"
 
     if fs.exists(temporaryPath) then
         fs.delete(temporaryPath)
     end
 
     if not writeFile(temporaryPath, remoteCode) then
-        print("Could not write update")
-        sleep(1)
+        print("Could not save update")
+        sleep(2)
         return
     end
 
     if readFile(temporaryPath) ~= remoteCode then
         fs.delete(temporaryPath)
         print("Update verification failed")
-        sleep(1)
+        sleep(2)
         return
     end
 
-    print("New version found")
-    print("Installing update...")
-
-    if fs.exists(backupPath) then
-        fs.delete(backupPath)
-    end
-
     if fs.exists(PROGRAM_PATH) then
-        fs.move(PROGRAM_PATH, backupPath)
+        fs.delete(PROGRAM_PATH)
     end
 
     fs.move(temporaryPath, PROGRAM_PATH)
+    writeFile(VERSION_PATH, latestVersion)
 
     print("Update installed")
     print("Restarting...")
     sleep(1)
+
     os.reboot()
 end
 
-math.randomseed(os.epoch("utc"))
 checkForUpdates()
 
 local detector = peripheral.find("playerDetector")
@@ -163,7 +206,7 @@ local function drawScreen(doorOpen, baseCount)
 
     monitor.setCursorPos(2, 4)
     monitor.setTextColor(colors.gray)
-    monitor.write(string.rep("-", math.max(1, width - 2)))
+    monitor.write(string.rep("-", math.max(1, width - 3)))
 
     monitor.setCursorPos(2, 6)
     monitor.setTextColor(colors.white)
