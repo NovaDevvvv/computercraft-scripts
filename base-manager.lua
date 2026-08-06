@@ -96,6 +96,8 @@ local function drawZone(zone, isOpen)
         center(math.floor(height / 2) + 1, "CLOSED", colors.red)
     end
 
+    center(math.floor(height / 2) + 3, "Players on base: "..baseCount, colors.yellow)
+
     center(height - 1, "Range: " .. zone.range .. " blocks", colors.lightGray)
 end
 
