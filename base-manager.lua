@@ -293,7 +293,6 @@ local function speak(text, shouldChime)
         end
 
         local decoder = require("cc.audio.dfpwm").make_decoder()
-        local speaker = speakers[1].device
 
         while true do
             local chunk = response.read(16 * 1024)
@@ -305,8 +304,26 @@ local function speak(text, shouldChime)
             bytesPlayed = bytesPlayed + #chunk
             local audio = decoder(chunk)
 
-            while not speaker.playAudio(audio, volume) do
-                os.pullEvent("speaker_audio_empty")
+            local pending = {}
+
+            for _, speaker in ipairs(speakers) do
+                table.insert(pending, speaker.device)
+            end
+
+            while #pending > 0 do
+                local stillPending = {}
+
+                for _, speaker in ipairs(pending) do
+                    if not speaker.playAudio(audio, volume) then
+                        table.insert(stillPending, speaker)
+                    end
+                end
+
+                pending = stillPending
+
+                if #pending > 0 then
+                    os.pullEvent("speaker_audio_empty")
+                end
             end
         end
 
@@ -320,7 +337,7 @@ local function speak(text, shouldChime)
         end
 
         setStatus(
-            "Spoke " .. tostring(bytesPlayed) .. " audio bytes",
+            "Streamed to " .. tostring(#speakers) .. " speaker(s)",
             4
         )
     else
