@@ -228,25 +228,25 @@ local function playTTS(text, speakers)
         return false, "No speakers connected"
     end
 
-    local url =
-        "https://music.madefor.cc/tts?text="
-        .. textutils.urlEncode(text)
-        .. "&nocache="
-        .. tostring(os.epoch("utc"))
+    local encodedText = text:gsub("([^%w%-_%.~])", function(character)
+        return string.format("%%%02X", string.byte(character))
+    end)
 
-    local response, errorMessage = http.get(url, {
-        ["Cache-Control"] = "no-cache",
-        ["User-Agent"] = "ComputerCraft-Base-Manager"
-    })
+    local url = "https://music.madefor.cc/tts?text=" .. encodedText
+
+    local response, errorMessage = http.get(url)
 
     if not response then
         return false, tostring(errorMessage or "TTS request failed")
     end
 
-    if response.getResponseCode() ~= 200 then
-        local status = response.getResponseCode()
+    local status = response.getResponseCode()
+
+    if status ~= 200 then
+        local body = response.readAll()
         response.close()
-        return false, "TTS returned HTTP " .. tostring(status)
+
+        return false, "TTS HTTP " .. tostring(status) .. ": " .. tostring(body)
     end
 
     local decoder = require("cc.audio.dfpwm").make_decoder()
@@ -259,26 +259,26 @@ local function playTTS(text, speakers)
         end
 
         local audio = decoder(chunk)
-        local waiting = {}
+        local pending = {}
 
-        for index, speakerData in ipairs(speakers) do
-            waiting[index] = true
+        for index = 1, #speakers do
+            pending[index] = true
         end
 
         while true do
-            local remaining = false
+            local waiting = false
 
             for index, speakerData in ipairs(speakers) do
-                if waiting[index] then
+                if pending[index] then
                     if speakerData.device.playAudio(audio, 1.5) then
-                        waiting[index] = false
+                        pending[index] = false
                     else
-                        remaining = true
+                        waiting = true
                     end
                 end
             end
 
-            if not remaining then
+            if not waiting then
                 break
             end
 
