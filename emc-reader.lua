@@ -1,5 +1,6 @@
 local readerSide = "left"
 local monitorSide = "top"
+
 local emcPerItem = 466944
 local updateRate = 1
 
@@ -22,20 +23,22 @@ local previousCount = nil
 local previousTime = os.epoch("utc") / 1000
 local itemsPerSecond = 0
 
-local function formatNumber(number)
-    number = math.floor(number or 0)
+local function formatNumber(value)
+    value = math.floor(value or 0)
 
-    if number >= 1e12 then
-        return string.format("%.2fT", number / 1e12)
-    elseif number >= 1e9 then
-        return string.format("%.2fB", number / 1e9)
-    elseif number >= 1e6 then
-        return string.format("%.2fM", number / 1e6)
-    elseif number >= 1e3 then
-        return string.format("%.2fK", number / 1e3)
+    if value >= 1e15 then
+        return string.format("%.2fQ", value / 1e15)
+    elseif value >= 1e12 then
+        return string.format("%.2fT", value / 1e12)
+    elseif value >= 1e9 then
+        return string.format("%.2fB", value / 1e9)
+    elseif value >= 1e6 then
+        return string.format("%.2fM", value / 1e6)
+    elseif value >= 1e3 then
+        return string.format("%.2fK", value / 1e3)
     end
 
-    return tostring(number)
+    return tostring(value)
 end
 
 local function getItemName(id)
@@ -62,14 +65,16 @@ end
 
 while true do
     local data = reader.getBlockData()
-    local stack = data
+
+    local slot =
+        data
         and data.handler
         and data.handler.BigItems
         and data.handler.BigItems["0"]
-        and data.handler.BigItems["0"].Stack
 
+    local stack = slot and slot.Stack
     local itemId = stack and stack.id or "minecraft:air"
-    local count = stack and (stack.Count or stack.count) or 0
+    local count = slot and slot.Amount or 0
 
     local currentTime = os.epoch("utc") / 1000
     local elapsed = currentTime - previousTime
