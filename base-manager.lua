@@ -610,7 +610,7 @@ local function drawSound()
     local visibleText = speechText
 
     if visibleText == "" then
-        visibleText = "Click, then use Minecraft chat"
+        visibleText = "Click, then chat: $message"
     end
 
     writeAt(
@@ -678,7 +678,8 @@ local function updateBaseState()
     doorOpen = nextDoorOpen
     baseCount = nextBaseCount
     speakerCount = nextSpeakerCount
-    chatBox = peripheral.find("chatBox")
+    chatBox = peripheral.find("chat_box")
+        or peripheral.find("chatBox")
 
     integrator.setOutput(
         OUTPUT_SIDE,
@@ -726,7 +727,7 @@ local function handleTouch(x, y)
 
         textFocused = true
         if chatBox then
-            setStatus("Type the message in Minecraft chat", 8)
+            setStatus("Type $message in Minecraft chat", 8)
         else
             setStatus("No Chat Box; use computer keyboard", 8)
         end
@@ -774,7 +775,7 @@ local function managerLoop()
     local lastRedrawSecond = math.floor(os.clock())
 
     while true do
-        local event, first, second, third =
+        local event, first, second, third, fourth, fifth =
             os.pullEvent()
 
         if event == "timer" and first == timer then
@@ -829,9 +830,14 @@ local function managerLoop()
         elseif event == "chat"
             and chatBox
             and activeTab == "sound"
-            and textFocused then
+            and textFocused
+            and fourth == true then
 
-            speechText = tostring(second or ""):sub(1, 100)
+            local modernChatBox = peripheral.find("chat_box") ~= nil
+            local message = modernChatBox and third or second
+
+            message = tostring(message or ""):gsub("^%$", "", 1)
+            speechText = message:sub(1, 100)
             textFocused = false
             queueSpeech(speechText)
             redraw()
