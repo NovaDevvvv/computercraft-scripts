@@ -25,6 +25,7 @@ local statusUntil = 0
 local doorOpen = false
 local baseCount = 0
 local speakerCount = 0
+local chatBox = nil
 
 local function readFile(path)
     if not fs.exists(path) then
@@ -609,7 +610,7 @@ local function drawSound()
     local visibleText = speechText
 
     if visibleText == "" then
-        visibleText = "Click here, then type"
+        visibleText = "Click, then use Minecraft chat"
     end
 
     writeAt(
@@ -666,14 +667,25 @@ local function updateBaseState()
     local basePlayers =
         detector.getPlayersInRange(BASE_RANGE) or {}
 
-    doorOpen = #hallwayPlayers > 0
-    baseCount = #basePlayers
-    speakerCount = #getSpeakers()
+    local nextDoorOpen = #hallwayPlayers > 0
+    local nextBaseCount = #basePlayers
+    local nextSpeakerCount = #getSpeakers()
+    local changed =
+        doorOpen ~= nextDoorOpen
+        or baseCount ~= nextBaseCount
+        or speakerCount ~= nextSpeakerCount
+
+    doorOpen = nextDoorOpen
+    baseCount = nextBaseCount
+    speakerCount = nextSpeakerCount
+    chatBox = peripheral.find("chatBox")
 
     integrator.setOutput(
         OUTPUT_SIDE,
         doorOpen
     )
+
+    return changed
 end
 
 local function inside(x, y, left, top, right, bottom)
@@ -707,12 +719,17 @@ local function handleTouch(x, y)
         x,
         y,
         2,
-        12,
+        11,
         math.max(2, width - 10),
-        12
+        13
     ) then
 
         textFocused = true
+        if chatBox then
+            setStatus("Type the message in Minecraft chat", 8)
+        else
+            setStatus("No Chat Box; use computer keyboard", 8)
+        end
         redraw()
         return
     end
@@ -739,9 +756,9 @@ local function handleTouch(x, y)
         x,
         y,
         math.max(2, width - 8),
-        12,
+        11,
         width - 2,
-        12
+        13
     ) then
         queueSpeech(speechText)
         redraw()
@@ -754,14 +771,21 @@ local function managerLoop()
     redraw()
 
     local timer = os.startTimer(UPDATE_RATE)
+    local lastRedrawSecond = math.floor(os.clock())
 
     while true do
         local event, first, second, third =
             os.pullEvent()
 
         if event == "timer" and first == timer then
-            updateBaseState()
-            redraw()
+            local changed = updateBaseState()
+            local currentSecond = math.floor(os.clock())
+
+            if changed or currentSecond ~= lastRedrawSecond then
+                redraw()
+                lastRedrawSecond = currentSecond
+            end
+
             timer = os.startTimer(UPDATE_RATE)
 
         elseif event == "monitor_touch"
@@ -801,6 +825,16 @@ local function managerLoop()
                 queueSpeech(speechText)
                 redraw()
             end
+
+        elseif event == "chat"
+            and chatBox
+            and activeTab == "sound"
+            and textFocused then
+
+            speechText = tostring(second or ""):sub(1, 100)
+            textFocused = false
+            queueSpeech(speechText)
+            redraw()
 
         elseif event == "peripheral"
             or event == "peripheral_detach" then
