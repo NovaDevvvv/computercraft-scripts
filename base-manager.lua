@@ -267,13 +267,26 @@ local function speak(text, shouldChime)
 
     if shouldChime ~= false then
         playPdaChime(speakers)
+        -- Let the final note finish before starting streamed audio on the
+        -- same speaker.
+        sleep(0.5)
     end
     setStatus("Speaking...", 10)
 
     local url = TTS_URL .. textutils.urlEncode(text)
 
+    local bytesPlayed = 0
     local success, problem = pcall(function()
-        local response, requestProblem = http.get(url)
+        -- TTS returns headerless binary DFPWM. Requesting a binary handle
+        -- prevents the encoded audio from being treated as text.
+        local response, requestProblem = http.get(
+            url,
+            {
+                ["Accept"] = "application/octet-stream",
+                ["Cache-Control"] = "no-cache"
+            },
+            true
+        )
 
         if not response then
             error(requestProblem or "TTS download failed", 0)
@@ -289,6 +302,7 @@ local function speak(text, shouldChime)
                 break
             end
 
+            bytesPlayed = bytesPlayed + #chunk
             local audio = decoder(chunk)
 
             while not speaker.playAudio(audio, volume) do
@@ -300,7 +314,15 @@ local function speak(text, shouldChime)
     end)
 
     if success then
-        setStatus("Finished speaking", 2)
+        if bytesPlayed == 0 then
+            setStatus("Speech failed: empty audio", 6)
+            return false
+        end
+
+        setStatus(
+            "Spoke " .. tostring(bytesPlayed) .. " audio bytes",
+            4
+        )
     else
         setStatus(
             "Speech failed: " .. tostring(problem),
