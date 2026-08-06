@@ -20,11 +20,11 @@ monitor.setBackgroundColor(colors.black)
 monitor.clear()
 
 local previousAmount = nil
-local previousTime = os.epoch("utc") / 1000
+local previousTime = nil
 local itemsPerSecond = 0
 
 local function formatNumber(value)
-    value = math.floor(value or 0)
+    value = math.floor((value or 0) + 0.5)
 
     if value >= 1e15 then
         return string.format("%.2fQ", value / 1e15)
@@ -84,21 +84,24 @@ while true do
     end
 
     local currentTime = os.epoch("utc") / 1000
-    local elapsed = currentTime - previousTime
 
-    if previousAmount ~= nil and elapsed > 0 then
+    if previousAmount == nil then
+        previousAmount = amount
+        previousTime = currentTime
+    elseif amount > previousAmount then
         local gained = amount - previousAmount
+        local elapsed = currentTime - previousTime
 
-        if gained >= 0 then
-            local currentRate = gained / elapsed
-            itemsPerSecond = itemsPerSecond * 0.7 + currentRate * 0.3
-        else
-            itemsPerSecond = 0
+        if elapsed > 0 then
+            itemsPerSecond = gained / elapsed
         end
-    end
 
-    previousAmount = amount
-    previousTime = currentTime
+        previousAmount = amount
+        previousTime = currentTime
+    elseif amount < previousAmount then
+        previousAmount = amount
+        previousTime = currentTime
+    end
 
     local totalEmc = amount * emcPerItem
     local itemsPerMinute = itemsPerSecond * 60
