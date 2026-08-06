@@ -238,7 +238,21 @@ local function setStatus(message, duration)
     statusUntil = os.clock() + (duration or 3)
 end
 
-local function speak(text)
+local function playPdaChime(speakers)
+    speakers = speakers or getSpeakers()
+
+    local notes = { 12, 16, 20 }
+
+    for _, pitch in ipairs(notes) do
+        for _, speaker in ipairs(speakers) do
+            speaker.device.playNote("bell", volume, pitch)
+        end
+
+        sleep(0.15)
+    end
+end
+
+local function speak(text, shouldChime)
     if text == nil or text == "" then
         setStatus("Enter some text first", 3)
         return false
@@ -251,6 +265,9 @@ local function speak(text)
         return false
     end
 
+    if shouldChime ~= false then
+        playPdaChime(speakers)
+    end
     setStatus("Speaking...", 10)
 
     local url = TTS_URL .. textutils.urlEncode(text)
@@ -259,7 +276,8 @@ local function speak(text)
     local success = shell.run(
         "speaker",
         "play",
-        url
+        url,
+        tostring(volume)
     )
 
     if success then
@@ -271,24 +289,19 @@ local function speak(text)
     return success
 end
 
+local function queueSpeech(text)
+    if text == nil or text == "" then
+        setStatus("Enter some text first", 3)
+        return false
+    end
+
+    os.queueEvent("base_manager_speak", text)
+    setStatus("Message queued", 2)
+    return true
+end
+
 local function playStartupChime()
-    local speakers = getSpeakers()
-
-    for _, speaker in ipairs(speakers) do
-        speaker.device.playNote("bell", 1.5, 12)
-    end
-
-    sleep(0.15)
-
-    for _, speaker in ipairs(speakers) do
-        speaker.device.playNote("bell", 1.5, 16)
-    end
-
-    sleep(0.15)
-
-    for _, speaker in ipairs(speakers) do
-        speaker.device.playNote("bell", 1.5, 20)
-    end
+    playPdaChime()
 end
 
 checkForUpdates()
@@ -766,8 +779,7 @@ local function handleTouch(x, y)
         width - 2,
         12
     ) then
-        redraw()
-        speak(speechText)
+        queueSpeech(speechText)
         redraw()
         return
     end
@@ -806,28 +818,31 @@ local function managerLoop()
     end
 end
 
-local function startupAudio()
+local function audioLoop()
     sleep(2)
 
     speakerCount = #getSpeakers()
 
-    if speakerCount == 0 then
-        return
+    if speakerCount > 0 then
+        playStartupChime()
+        sleep(0.4)
+
+        speak("All systems online", false)
     end
 
-    playStartupChime()
-    sleep(0.4)
+    while true do
+        local _, text = os.pullEvent("base_manager_speak")
 
-    speak("All systems online")
+        speak(text)
+    end
 end
 
 local ok, problem = pcall(function()
-    -- The startup audio task is short-lived, while managerLoop must keep
-    -- running for monitor touches. waitForAny terminated managerLoop as soon
-    -- as the chime/announcement finished, leaving the drawn UI unresponsive.
+    -- Keep redstone/player detection responsive while audio streams in its
+    -- own event task.
     parallel.waitForAll(
         managerLoop,
-        startupAudio
+        audioLoop
     )
 end)
 
