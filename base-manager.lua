@@ -19,6 +19,7 @@ local function readFile(path)
 
     local contents = file.readAll()
     file.close()
+
     return contents or ""
 end
 
@@ -31,6 +32,7 @@ local function writeFile(path, contents)
 
     file.write(contents)
     file.close()
+
     return true
 end
 
@@ -41,6 +43,8 @@ local function checkForUpdates()
         return
     end
 
+    term.clear()
+    term.setCursorPos(1, 1)
     print("Checking for updates...")
 
     local cacheKey = tostring(os.epoch("utc")) .. "-" .. tostring(math.random(100000, 999999))
@@ -85,6 +89,7 @@ local function checkForUpdates()
     end
 
     local temporaryPath = PROGRAM_PATH .. ".new"
+    local backupPath = PROGRAM_PATH .. ".old"
 
     if fs.exists(temporaryPath) then
         fs.delete(temporaryPath)
@@ -96,9 +101,7 @@ local function checkForUpdates()
         return
     end
 
-    local downloadedCode = readFile(temporaryPath)
-
-    if downloadedCode ~= remoteCode then
+    if readFile(temporaryPath) ~= remoteCode then
         fs.delete(temporaryPath)
         print("Update verification failed")
         sleep(1)
@@ -108,12 +111,12 @@ local function checkForUpdates()
     print("New version found")
     print("Installing update...")
 
-    if fs.exists(PROGRAM_PATH .. ".old") then
-        fs.delete(PROGRAM_PATH .. ".old")
+    if fs.exists(backupPath) then
+        fs.delete(backupPath)
     end
 
     if fs.exists(PROGRAM_PATH) then
-        fs.move(PROGRAM_PATH, PROGRAM_PATH .. ".old")
+        fs.move(PROGRAM_PATH, backupPath)
     end
 
     fs.move(temporaryPath, PROGRAM_PATH)
@@ -145,68 +148,57 @@ end
 
 monitor.setTextScale(0.5)
 monitor.setBackgroundColor(colors.black)
+monitor.setTextColor(colors.white)
 monitor.clear()
 
-local function centeredText(y, text, color)
+local function drawScreen(doorOpen, baseCount)
     local width = monitor.getSize()
-    local x = math.floor((width - #text) / 2) + 1
-
-    monitor.setCursorPos(math.max(1, x), y)
-    monitor.setTextColor(color or colors.white)
-    monitor.write(text)
-end
-
-local function drawScreen(doorOpen, baseCount, hallwayCount)
-    local width, height = monitor.getSize()
 
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
 
-    centeredText(2, "BASE MANAGER", colors.cyan)
+    monitor.setCursorPos(2, 2)
+    monitor.setTextColor(colors.cyan)
+    monitor.write("BASE MANAGER")
 
-    monitor.setTextColor(colors.gray)
     monitor.setCursorPos(2, 4)
+    monitor.setTextColor(colors.gray)
     monitor.write(string.rep("-", math.max(1, width - 2)))
 
-    centeredText(6, DOOR_NAME, colors.white)
+    monitor.setCursorPos(2, 6)
+    monitor.setTextColor(colors.white)
+    monitor.write(DOOR_NAME .. ": ")
 
     if doorOpen then
-        centeredText(8, "OPEN", colors.lime)
+        monitor.setTextColor(colors.lime)
+        monitor.write("OPEN")
     else
-        centeredText(8, "CLOSED", colors.red)
+        monitor.setTextColor(colors.red)
+        monitor.write("CLOSED")
     end
 
-    centeredText(11, "Hallway Players: " .. tostring(hallwayCount), colors.lightGray)
-    centeredText(13, "Players On Base: " .. tostring(baseCount), colors.yellow)
-
-    monitor.setTextColor(colors.gray)
-    monitor.setCursorPos(2, height - 1)
-    monitor.write("Range: " .. tostring(BASE_RANGE) .. " blocks")
+    monitor.setCursorPos(2, 8)
+    monitor.setTextColor(colors.yellow)
+    monitor.write("Players On Base: " .. tostring(baseCount))
 end
 
 local previousDoorState = nil
 local previousBaseCount = nil
-local previousHallwayCount = nil
 
 while true do
     local hallwayPlayers = detector.getPlayersInRange(DOOR_RANGE) or {}
     local basePlayers = detector.getPlayersInRange(BASE_RANGE) or {}
 
-    local hallwayCount = #hallwayPlayers
+    local doorOpen = #hallwayPlayers > 0
     local baseCount = #basePlayers
-    local doorOpen = hallwayCount > 0
 
     integrator.setOutput(OUTPUT_SIDE, doorOpen)
 
-    if doorOpen ~= previousDoorState
-        or baseCount ~= previousBaseCount
-        or hallwayCount ~= previousHallwayCount then
-
-        drawScreen(doorOpen, baseCount, hallwayCount)
+    if doorOpen ~= previousDoorState or baseCount ~= previousBaseCount then
+        drawScreen(doorOpen, baseCount)
 
         previousDoorState = doorOpen
         previousBaseCount = baseCount
-        previousHallwayCount = hallwayCount
     end
 
     sleep(UPDATE_RATE)
