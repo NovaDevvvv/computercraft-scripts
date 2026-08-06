@@ -259,8 +259,7 @@ local function speak(text)
     local success = shell.run(
         "speaker",
         "play",
-        url,
-        tostring(volume)
+        url
     )
 
     if success then
