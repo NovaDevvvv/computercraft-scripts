@@ -207,24 +207,66 @@ local function formatUptime()
     )
 end
 
-local function getSpeakerCount()
-    local count = 0
+local function getSpeakers()
+    local speakers = {}
 
     for _, name in ipairs(peripheral.getNames()) do
         if peripheral.hasType(name, "speaker") then
-            count = count + 1
+            local speaker = peripheral.wrap(name)
+
+            if speaker then
+                table.insert(speakers, {
+                    name = name,
+                    device = speaker
+                })
+            end
         end
     end
 
-    return count
+    return speakers
+end
+
+local function playNoteOnEverySpeaker(instrument, volume, pitch)
+    local speakers = getSpeakers()
+
+    for _, speakerData in ipairs(speakers) do
+        speakerData.device.playNote(
+            instrument or "harp",
+            volume or 2,
+            pitch or 12
+        )
+    end
+end
+
+local function playStartupChime()
+    playNoteOnEverySpeaker("bell", 2, 12)
+    sleep(0.15)
+
+    playNoteOnEverySpeaker("bell", 2, 16)
+    sleep(0.15)
+
+    playNoteOnEverySpeaker("bell", 2, 20)
 end
 
 local function speak(text, description)
+    local speakers = getSpeakers()
+
+    if #speakers == 0 then
+        printError("No speakers connected")
+        return false
+    end
+
     print("Speaking " .. description)
 
     local url = TTS_URL .. textutils.urlEncode(text)
 
-    if not shell.run("speaker", "play", url) then
+    local success = shell.run(
+        "speaker",
+        "play",
+        url
+    )
+
+    if not success then
         printError("Could not play " .. description)
         return false
     end
@@ -263,21 +305,18 @@ local function writeAt(x, y, text, foreground, background)
     monitor.write(text)
 end
 
-local function clearLine(y)
-    local width = monitor.getSize()
-
-    monitor.setCursorPos(1, y)
-    monitor.setBackgroundColor(colors.black)
-    monitor.write(string.rep(" ", width))
-end
-
 local function drawScreen(doorOpen, baseCount, speakerCount)
     local width, height = monitor.getSize()
 
     monitor.setBackgroundColor(colors.black)
     monitor.clear()
 
-    writeAt(2, 2, "BASE MANAGER", colors.cyan)
+    writeAt(
+        2,
+        2,
+        "BASE MANAGER",
+        colors.cyan
+    )
 
     writeAt(
         2,
@@ -286,12 +325,29 @@ local function drawScreen(doorOpen, baseCount, speakerCount)
         colors.gray
     )
 
-    writeAt(2, 6, DOOR_NAME .. ": ", colors.white)
+    writeAt(
+        2,
+        6,
+        DOOR_NAME .. ": ",
+        colors.white
+    )
+
+    local statusX = 2 + #DOOR_NAME + 2
 
     if doorOpen then
-        writeAt(2 + #DOOR_NAME + 2, 6, "OPEN", colors.lime)
+        writeAt(
+            statusX,
+            6,
+            "OPEN",
+            colors.lime
+        )
     else
-        writeAt(2 + #DOOR_NAME + 2, 6, "CLOSED", colors.red)
+        writeAt(
+            statusX,
+            6,
+            "CLOSED",
+            colors.red
+        )
     end
 
     writeAt(
@@ -308,9 +364,12 @@ local function drawScreen(doorOpen, baseCount, speakerCount)
         colors.lightBlue
     )
 
-    clearLine(height)
+    monitor.setCursorPos(1, height)
+    monitor.setBackgroundColor(colors.black)
+    monitor.write(string.rep(" ", width))
 
-    local uptimeText = "Uptime: " .. formatUptime()
+    local uptimeText =
+        "Uptime: " .. formatUptime()
 
     writeAt(
         2,
@@ -335,10 +394,13 @@ local function managerLoop()
 
         local doorOpen = #hallwayPlayers > 0
         local baseCount = #basePlayers
-        local speakerCount = getSpeakerCount()
+        local speakerCount = #getSpeakers()
         local uptime = formatUptime()
 
-        integrator.setOutput(OUTPUT_SIDE, doorOpen)
+        integrator.setOutput(
+            OUTPUT_SIDE,
+            doorOpen
+        )
 
         if doorOpen ~= previousDoorState
             or baseCount ~= previousBaseCount
@@ -361,13 +423,27 @@ local function managerLoop()
     end
 end
 
-local function startupVoice()
+local function startupAudio()
     sleep(2)
 
-    if getSpeakerCount() == 0 then
+    local speakers = getSpeakers()
+
+    if #speakers == 0 then
         printError("No speakers connected")
         return
     end
+
+    print(
+        "Connected speakers: "
+        .. tostring(#speakers)
+    )
+
+    for _, speakerData in ipairs(speakers) do
+        print(" - " .. speakerData.name)
+    end
+
+    playStartupChime()
+    sleep(0.4)
 
     speak(
         "All systems online",
@@ -378,11 +454,14 @@ end
 local ok, problem = pcall(function()
     parallel.waitForAll(
         managerLoop,
-        startupVoice
+        startupAudio
     )
 end)
 
-integrator.setOutput(OUTPUT_SIDE, false)
+integrator.setOutput(
+    OUTPUT_SIDE,
+    false
+)
 
 if not ok and tostring(problem) ~= "Terminated" then
     printError(problem)
