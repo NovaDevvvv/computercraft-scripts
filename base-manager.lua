@@ -295,7 +295,7 @@ checkForUpdates()
 
 local detector = peripheral.find("playerDetector")
 local integrator = peripheral.find("redstoneIntegrator")
-local monitor, monitorName = peripheral.find("monitor")
+local monitor = peripheral.find("monitor")
 
 if not detector then
     error("No Player Detector found", 0)
@@ -308,6 +308,10 @@ end
 if not monitor then
     error("No monitor found", 0)
 end
+
+-- peripheral.find returns wrapped peripherals, not their wired names. The
+-- monitor_touch event supplies the name, so resolve it from the wrapper.
+local monitorName = peripheral.getName(monitor)
 
 monitor.setTextScale(0.5)
 monitor.setCursorBlink(false)
